@@ -1,0 +1,11 @@
+{
+  "name": "ss-wakeel-bot",
+  "version": "2.0.0",
+  "description": "AI Telegram Bot powered by GitHub Models",
+  "main": "bot.js",
+  "scripts": { "start": "node bot.js" },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "node-fetch": "^2.7.0"
+  }
+}

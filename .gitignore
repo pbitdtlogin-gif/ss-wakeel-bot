@@ -1,0 +1,6 @@
+node_modules/
+bot.log
+bot.pid
+restart_count.txt
+.env
+.env.example
