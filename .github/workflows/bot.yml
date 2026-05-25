@@ -1,4 +1,4 @@
-name: Run Telegram Bot (24/7)
+name: 🚀 Ss Wakeel Bot - 24/7 Operation
 
 on:
   workflow_dispatch:
@@ -7,27 +7,33 @@ on:
 
 jobs:
   run-bot:
+    name: 🤖 Telegram Bot
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
-      - name: Install system deps for canvas
+      - name: 📦 Install dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+          npm install
 
-      - name: Install dependencies
-        run: npm install
+      - name: ✅ Test modules
+        run: node -e "require('./ui'); require('./self_heal'); console.log('✅ All good')"
 
-      - name: Run bot
+      - name: 🔥 Run bot (auto-restart loop)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER_ID: ${{ secrets.OWNER_ID }}
-        run: node bot.js
+        run: |
+          while true; do
+            echo "[$(date)] Starting bot..." && node bot.js || true
+            echo "[$(date)] Exited. Restarting in 10s..." && sleep 10
+          done
