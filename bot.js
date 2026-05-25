@@ -6,20 +6,18 @@ const API_URL = 'https://models.inference.ai.azure.com/chat/completions';
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
 
-// Check tokens
 if (!TOKEN || !GITHUB_TOKEN) {
-  console.error('❌ Missing BOT_TOKEN or GITHUB_TOKEN environment variables');
+  console.error('❌ Missing BOT_TOKEN or GITHUB_TOKEN');
   process.exit(1);
 }
 
-// Models map
 const MODELS = [
   { id: 0, name: 'GPT-4o', model: 'gpt-4o', tier: 3 },
   { id: 1, name: 'DeepSeek-R1', model: 'DeepSeek-R1', tier: 3 },
   { id: 2, name: 'GPT-4o-mini', model: 'gpt-4o-mini', tier: 2 },
   { id: 3, name: 'Phi-4', model: 'Phi-4', tier: 2 },
-  { id: 4, name: 'Meta-Llama-3.1-405B', model: 'Meta-Llama-3.1-405B-Instruct', tier: 2 },
-  { id: 5, name: 'Meta-Llama-3.1-8B', model: 'Meta-Llama-3.1-8B-Instruct', tier: 1 },
+  { id: 4, name: 'Llama-3.1-405B', model: 'Meta-Llama-3.1-405B-Instruct', tier: 2 },
+  { id: 5, name: 'Llama-3.1-8B', model: 'Meta-Llama-3.1-8B-Instruct', tier: 1 },
   { id: 6, name: 'Mistral-large', model: 'Mistral-large-2407', tier: 2 },
   { id: 7, name: 'Cohere-command-r+', model: 'Cohere-command-r-plus-08-2024', tier: 2 },
   { id: 8, name: 'DeepSeek-V3', model: 'DeepSeek-V3-0324', tier: 3 },
@@ -38,35 +36,35 @@ const MAX_HISTORY = 20;
 const startTime = Date.now();
 let messageCount = 0;
 let restartCount = 0;
-
+const fs = require('fs');
 try {
-  const fs = require('fs');
   const rc = fs.readFileSync('restart_count.txt', 'utf8').trim();
   restartCount = parseInt(rc) || 0;
-} catch(e) {}
+} catch (e) {}
 
 function saveRestartCount() {
-  require('fs').writeFileSync('restart_count.txt', String(restartCount));
+  fs.writeFileSync('restart_count.txt', String(restartCount));
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  fs.appendFileSync('bot.log', line);
+  console.log(line.trim());
+}
+
 async function callAI(messages) {
-  const body = {
-    model: activeModel.model,
-    messages,
-    temperature: 0.7,
-    max_tokens: 2048,
-  };
+  const body = { model: activeModel.model, messages, temperature: 0.7, max_tokens: 2048 };
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GITHUB_TOKEN}`,
-    },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GITHUB_TOKEN}` },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API ${res.status}: ${errText.slice(0, 200)}`);
+  }
   const data = await res.json();
   return data.choices[0].message.content;
 }
@@ -89,7 +87,7 @@ function addChat(uid, role, content) {
   if (!userChats[uid]) userChats[uid] = [];
   userChats[uid].push({ role, content });
   if (userChats[uid].length > MAX_HISTORY) {
-    userChats[uid].splice(0, userChats[uid].length - MAX_HISTORY);
+    userChats[uid] = userChats[uid].slice(-MAX_HISTORY);
   }
 }
 
@@ -99,21 +97,23 @@ function getSystemPrompt(name) {
 
 async function safeReply(chatId, text, opts = {}) {
   try {
-    if (text.length > 4000) {
-      for (let i = 0; i < text.length; i += 4000) {
-        await bot.sendMessage(chatId, text.substring(i, i + 4000), { ...opts, parse_mode: 'Markdown' });
+    const maxLen = 4000;
+    if (text.length > maxLen) {
+      for (let i = 0; i < text.length; i += maxLen) {
+        await bot.sendMessage(chatId, text.substring(i, i + maxLen), { ...opts, parse_mode: 'Markdown' });
       }
     } else {
       await bot.sendMessage(chatId, text, { ...opts, parse_mode: 'Markdown' });
     }
   } catch (e) {
-    try { await bot.sendMessage(chatId, text.replace(/[*_`]/g, ''), opts); } catch(e2) {}
+    try {
+      await bot.sendMessage(chatId, text.replace(/[*_`]/g, ''), opts);
+    } catch (e2) {}
   }
 }
 
-const OWNER_COMMANDS = [
-  '🔐 *لوحة تحكم المطور — Karkroot*',
-  '',
+const OWNER_CMDS = [
+  '🔐 *لوحة تحكم المطور — Karkroot*\n',
   '📊 *الإدارة*',
   '• /status — حالة البوت الكاملة',
   '• /restart — إعادة تشغيل البوت',
@@ -137,14 +137,13 @@ const OWNER_COMMANDS = [
   '⚙️ *متقدم*',
   '• /logs — آخر 20 سطر سجل',
   '• /clearlogs — مسح السجل',
-  '• /exec <كود> — تنفيذ أمر Node.js ⚠️',
-  '• /shell <أمر> — تنفيذ أمر Bash ⚠️',
-  '• /eval <كود> — تقييم JavaScript ⚠️',
-  '• /reset — إعادة ضبط البوت (مسح كل البيانات)',
   '• /say <رسالة> — البوت يتكلم نيابة عنك',
+  '• /reset — إعادة ضبط البوت (مسح كل البيانات)',
+  '• /stats — إحصائيات البوت',
+  '• /export — تصدير بيانات المستخدمين',
   '',
   '🔒 *هذه الأوامر مخصصة للمالك فقط*',
-].join(String.fromCharCode(10));
+].join('\n');
 
 bot.on('message', async (msg) => {
   try {
@@ -157,23 +156,46 @@ bot.on('message', async (msg) => {
     if (!isOwner || !isPrivate) registerUser(msg);
     messageCount++;
 
+    // ===== OWNER COMMANDS =====
     if (isOwner && isPrivate) {
-      if (text === '/owner' || text === '/dev') return await safeReply(chatId, OWNER_COMMANDS);
+      if (text === '/owner' || text === '/dev') return await safeReply(chatId, OWNER_CMDS);
 
       if (text === '/status') {
         const uptime = Math.floor((Date.now() - startTime) / 1000);
         const h = Math.floor(uptime / 3600), m = Math.floor((uptime % 3600) / 60), s = uptime % 60;
+        const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
         return await safeReply(chatId,
-          `📊 *حالة البوت*\n\n🤖 *@Ss_Wakeel_bot*\n• 🟢 شغال\n• PID: \`${process.pid}\`\n• وقت: ${h}h ${m}m ${s}s\n• إعادة: #${restartCount}\n• رسائل: ${messageCount}\n• مستخدمين: ${Object.keys(users).length}\n\n🧠 *${activeModel.name}* ⭐\n💾 ذاكرة: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)} MB`);
+          `📊 *حالة البوت*\n\n🤖 *@Ss_Wakeel_bot*\n• 🟢 شغال\n• PID: \`${process.pid}\`\n• وقت: ${h}h ${m}m ${s}s\n• إعادة: #${restartCount}\n• رسائل: ${messageCount}\n• مستخدمين: ${Object.keys(users).length}\n\n🧠 *${activeModel.name}* ⭐\n💾 ذاكرة: ${mem} MB\n📌 الموديل: \`${activeModel.model}\``);
       }
 
       if (text === '/uptime') {
-        const uptime = Math.floor((Date.now() - startTime) / 1000);
-        const h = Math.floor(uptime / 3600), m = Math.floor((uptime % 3600) / 60), s = uptime % 60;
-        return await safeReply(chatId, `🕐 *وقت التشغيل:* ${h}h ${m}m ${s}s\n🔄 *إعادة:* #${restartCount}\n📊 *رسائل:* ${messageCount}`);
+        const t = Math.floor((Date.now() - startTime) / 1000);
+        const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+        return await safeReply(chatId, `🕐 *مدة التشغيل:* ${h}h ${m}m ${s}s\n🔄 *إعادة:* #${restartCount}\n📊 *رسائل:* ${messageCount}`);
       }
 
       if (text === '/pid') return await safeReply(chatId, `📌 *PID:* \`${process.pid}\``);
+
+      if (text === '/stats') {
+        const t = Math.floor((Date.now() - startTime) / 1000);
+        const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+        const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
+        return await safeReply(chatId,
+          `📊 *إحصائيات البوت*\n\n⏱ التشغيل: ${h}h ${m}m ${s}s\n🔄 إعادة تشغيل: #${restartCount}\n💬 رسائل: ${messageCount}\n👥 مستخدمين: ${Object.keys(users).length}\n🧠 النموذج: ${activeModel.name}\n💾 الذاكرة: ${mem} MB\n📌 PID: \`${process.pid}\``);
+      }
+
+      if (text === '/export') {
+        const list = Object.values(users);
+        if (!list.length) return await safeReply(chatId, '📭 ولا مستخدم للتصدير');
+        let csv = 'ID,Username,FirstName,LastName,FirstSeen,LastSeen,LastMessage\n';
+        list.forEach(u => {
+          csv += `${u.id},${u.username||''},${u.firstName||''},${u.lastName||''},${new Date(u.firstSeen).toISOString()},${new Date(u.lastSeen).toISOString()},${(u.lastMessage||'').replace(/,/g,' ')}\n`;
+        });
+        const fPath = '/tmp/users_export.csv';
+        fs.writeFileSync(fPath, csv);
+        try { await bot.sendDocument(chatId, fPath, { caption: '📋 بيانات المستخدمين' }); } catch(e) { await safeReply(chatId, `📋 ${list.length} مستخدم`); }
+        return;
+      }
 
       if (text === '/models') {
         let list = '🧠 *النماذج*\n\n';
@@ -190,6 +212,7 @@ bot.on('message', async (msg) => {
         const m = MODELS.find(x => x.id === num);
         if (!m) return await safeReply(chatId, '❌ رقم خطأ');
         activeModel = m;
+        log(`Model changed to ${m.name}`);
         return await safeReply(chatId, `✅ *${m.name}* ⭐`);
       }
 
@@ -201,9 +224,9 @@ bot.on('message', async (msg) => {
         activeModel = m;
         const t0 = Date.now();
         try {
-          const r = await callAI([{role:'system',content:'Reply OK'},{role:'user',content:'test'}]);
-          await safeReply(chatId, `✅ *${m.name}* — ${Date.now()-t0}ms\n\`${r}\``);
-        } catch(e) { await safeReply(chatId, `❌ *${m.name}*: ${e.message.slice(0,100)}`); }
+          const r = await callAI([{ role: 'system', content: 'Reply OK' }, { role: 'user', content: 'test' }]);
+          await safeReply(chatId, `✅ *${m.name}* — ${Date.now() - t0}ms\n\`${r}\``);
+        } catch (e) { await safeReply(chatId, `❌ *${m.name}*: ${e.message.slice(0, 100)}`); }
         activeModel = prev;
         return;
       }
@@ -214,9 +237,10 @@ bot.on('message', async (msg) => {
           if (m.id === activeModel.id) continue;
           try {
             activeModel = m;
-            await callAI([{role:'system',content:'OK'},{role:'user',content:'t'}]);
+            await callAI([{ role: 'system', content: 'OK' }, { role: 'user', content: 't' }]);
+            log(`Auto-switched to ${m.name}`);
             return await safeReply(chatId, `✅ *${m.name}* 🚀`);
-          } catch(e) {}
+          } catch (e) {}
         }
         return await safeReply(chatId, '❌ ما لقيت بديل');
       }
@@ -225,91 +249,75 @@ bot.on('message', async (msg) => {
         const list = Object.values(users);
         if (!list.length) return await safeReply(chatId, '👥 ولا مستخدم');
         let out = `👥 *${list.length} مستخدم*\n\n`;
-        list.forEach((u,i) => {
-          out += `${i+1}. ${u.firstName}${u.lastName?' '+u.lastName:''} ${u.username?'@'+u.username:''}\n   \`${u.id}\`\n`;
+        list.forEach((u, i) => {
+          out += `${i + 1}. ${u.firstName}${u.lastName ? ' ' + u.lastName : ''} ${u.username ? '@' + u.username : ''}\n   \`${u.id}\`\n`;
         });
         return await safeReply(chatId, out);
       }
 
       if (text.startsWith('/uid ')) {
         const q = text.slice(5).toLowerCase();
-        const f = Object.values(users).filter(u => u.firstName.toLowerCase().includes(q) || (u.username||'').toLowerCase().includes(q) || String(u.id).includes(q));
+        const f = Object.values(users).filter(u =>
+          u.firstName.toLowerCase().includes(q) ||
+          (u.username || '').toLowerCase().includes(q) ||
+          String(u.id).includes(q)
+        );
         if (!f.length) return await safeReply(chatId, '❌ ما لقيت');
-        return await safeReply(chatId, '🔍 '+f.map(u=>`• ${u.firstName} (@${u.username||'—'}) — \`${u.id}\``).join('\n'));
+        return await safeReply(chatId, '🔍 ' + f.map(u => `• ${u.firstName} (@${u.username || '—'}) — \`${u.id}\``).join('\n'));
       }
 
       if (text.startsWith('/reply ')) {
         const p = text.split(' '), id = parseInt(p[1]), rt = p.slice(2).join(' ');
-        if (!id||!rt) return await safeReply(chatId, '❌ /reply <id> <رسالة>');
+        if (!id || !rt) return await safeReply(chatId, '❌ /reply <id> <رسالة>');
         try {
-          await bot.sendMessage(id, `📨 *من المطور:*\n\n${rt}`, {parse_mode:'Markdown'});
+          await bot.sendMessage(id, `📨 *من المطور:*\n\n${rt}`, { parse_mode: 'Markdown' });
+          log(`Replied to user ${id}: ${rt.slice(0, 50)}`);
           await safeReply(chatId, `✅ أرسلت لـ \`${id}\``);
-        } catch(e) { await safeReply(chatId, `❌ ${e.message.slice(0,100)}`); }
+        } catch (e) { await safeReply(chatId, `❌ ${e.message.slice(0, 100)}`); }
         return;
       }
 
       if (text.startsWith('/send ')) {
         const p = text.split(' '), id = parseInt(p[1]), st = p.slice(2).join(' ');
-        if (!id||!st) return await safeReply(chatId, '❌ /send <id> <رسالة>');
-        try { await bot.sendMessage(id, st); await safeReply(chatId, `✅ لـ \`${id}\``); }
-        catch(e) { await safeReply(chatId, `❌ ${e.message.slice(0,100)}`); }
+        if (!id || !st) return await safeReply(chatId, '❌ /send <id> <رسالة>');
+        try { await bot.sendMessage(id, st); await safeReply(chatId, `✅ لـ \`${id}\``); } catch (e) { await safeReply(chatId, `❌ ${e.message.slice(0, 100)}`); }
         return;
       }
 
       if (text.startsWith('/broadcast ')) {
         const bc = text.slice(11);
         const ids = Object.keys(users);
-        let ok=0,no=0;
+        let ok = 0, no = 0;
         await safeReply(chatId, `📢 بث لـ ${ids.length}...`);
         for (const id of ids) {
-          try { await bot.sendMessage(parseInt(id), `📢 *إعلان:*\n\n${bc}`, {parse_mode:'Markdown'}); ok++; }
-          catch(e) { no++; }
+          try { await bot.sendMessage(parseInt(id), `📢 *إعلان:*\n\n${bc}`, { parse_mode: 'Markdown' }); ok++; } catch (e) { no++; }
         }
         return await safeReply(chatId, `✅ تم: ${ok} | فشل: ${no}`);
       }
 
       if (text === '/logs') {
         try {
-          const l = require('fs').readFileSync('bot.log','utf8').split('\n').slice(-20).join('\n');
-          await safeReply(chatId, `📋 *آخر السجلات:*\n\`\`\`\n${l||'(فارغ)'}\n\`\`\``);
-        } catch(e) { await safeReply(chatId, '📋 السجل فارغ'); }
+          const l = fs.readFileSync('bot.log', 'utf8').split('\n').slice(-20).join('\n');
+          await safeReply(chatId, `📋 *آخر السجلات:*\n\`\`\`\n${l || '(فارغ)'}\n\`\`\``);
+        } catch (e) { await safeReply(chatId, '📋 السجل فارغ'); }
         return;
       }
 
-      if (text === '/clearlogs') { require('fs').writeFileSync('bot.log',''); return await safeReply(chatId, '✅ مسح'); }
+      if (text === '/clearlogs') { fs.writeFileSync('bot.log', ''); return await safeReply(chatId, '✅ مسح'); }
 
-      if (text === '/restart') { await safeReply(chatId, '🔄 ...'); setTimeout(()=>process.exit(0),500); return; }
+      if (text === '/restart') { await safeReply(chatId, '🔄 ...'); setTimeout(() => process.exit(0), 500); return; }
 
       if (text === '/reset') {
-        Object.keys(users).forEach(k=>delete users[k]);
-        Object.keys(userChats).forEach(k=>delete userChats[k]);
-        messageCount=0;
+        Object.keys(users).forEach(k => delete users[k]);
+        Object.keys(userChats).forEach(k => delete userChats[k]);
+        messageCount = 0;
         return await safeReply(chatId, '✅ *إعادة ضبط* — كل البيانات مسحت');
       }
 
       if (text.startsWith('/say ')) return await safeReply(chatId, `💬 ${text.slice(5)}`);
-
-      if (text.startsWith('/exec ')) {
-        try { const r = eval(text.slice(6)); await safeReply(chatId, `✅ \\\`\\\`\\\`\n${String(r)}\n\\\`\\\`\\\``); }
-        catch(e) { await safeReply(chatId, `❌ \\\`\\\`\\\`\n${e.message}\n\\\`\\\`\\\``); }
-        return;
-      }
-
-      if (text.startsWith('/eval ')) {
-        try { const r = await Promise.resolve(eval(`(async()=>{${text.slice(6)}})()`)); await safeReply(chatId, `✅ \\\`\\\`\\\`\n${String(r)}\n\\\`\\\`\\\``); }
-        catch(e) { await safeReply(chatId, `❌ \\\`\\\`\\\`\n${e.message}\n\\\`\\\`\\\``); }
-        return;
-      }
-
-      if (text.startsWith('/shell ')) {
-        const {execSync} = require('child_process');
-        try { const o = execSync(text.slice(7),{timeout:10000}).toString(); await safeReply(chatId, `✅ \\\`\\\`\\\`bash\n${o.slice(0,3000)}\n\\\`\\\`\\\``); }
-        catch(e) { await safeReply(chatId, `❌ \\\`\\\`\\\`\n${e.message.slice(0,1000)}\n\\\`\\\`\\\``); }
-        return;
-      }
     }
 
-    // User commands
+    // ===== USER COMMANDS =====
     if (text === '/start') {
       return await safeReply(chatId,
         `🤖 *مرحباً! أنا Karkroot*\n\nأقوى بوت ذكاء اصطناعي على تيليجرام 🧠\nالنشط: *${activeModel.name}*\n\n*الأوامر:*\n/help — مساعدة\n/models — النماذج\n/active — النموذج النشط\n/new — محادثة جديدة\n/admin — مراسلة المطور\n\nأرسل لي أي سؤال! 🚀`);
@@ -322,7 +330,7 @@ bot.on('message', async (msg) => {
 
     if (text === '/models') {
       let list = '🧠 *النماذج*\n\n';
-      MODELS.forEach(m => { list += `${m.id}. ${m.name} ${'🔥'.repeat(m.tier)}${m.id===activeModel.id?' ⭐':''}\n`; });
+      MODELS.forEach(m => { list += `${m.id}. ${m.name} ${'🔥'.repeat(m.tier)}${m.id === activeModel.id ? ' ⭐' : ''}\n`; });
       list += `\n📌 النشط: *${activeModel.name}*`;
       return await safeReply(chatId, list);
     }
@@ -334,13 +342,13 @@ bot.on('message', async (msg) => {
     if (text.startsWith('/admin ')) {
       const m = text.slice(7);
       try {
-        await bot.sendMessage(OWNER_ID, `📬 *من مستخدم:* ${msg.from.first_name||''} ${msg.from.username?'@'+msg.from.username:''}\n🆔 \`${uid}\`\n💬 ${m}\n\n📌 /reply ${uid} ...`);
+        await bot.sendMessage(OWNER_ID, `📬 *من مستخدم:* ${msg.from.first_name || ''} ${msg.from.username ? '@' + msg.from.username : ''}\n🆔 \`${uid}\`\n💬 ${m}\n\n📌 /reply ${uid} ...`);
         await safeReply(chatId, '✅ *أرسلت للمطور!*');
-      } catch(e) { await safeReply(chatId, '❌ فشل الإرسال'); }
+      } catch (e) { await safeReply(chatId, '❌ فشل الإرسال'); }
       return;
     }
 
-    // AI response
+    // ===== AI RESPONSE =====
     if (text && !text.startsWith('/')) {
       await bot.sendChatAction(chatId, 'typing');
       addChat(uid, 'user', text);
@@ -354,37 +362,39 @@ bot.on('message', async (msg) => {
         addChat(uid, 'assistant', reply);
         await safeReply(chatId, reply);
       } catch (e) {
+        log(`AI error: ${e.message}`);
         let ok = false;
         for (const m of MODELS) {
           if (m.id === activeModel.id) continue;
-          const prev = activeModel; activeModel = m;
+          const prev = activeModel;
+          activeModel = m;
           try {
-            const r = await callAI(ctx); addChat(uid,'assistant',r);
+            const r = await callAI(ctx);
+            addChat(uid, 'assistant', r);
             await safeReply(chatId, `⚠️ حولت لـ *${m.name}*\n\n${r}`);
-            ok = true; break;
-          } catch(e2) { activeModel = prev; }
+            ok = true;
+            log(`Fallback to ${m.name} OK`);
+            break;
+          } catch (e2) { activeModel = prev; }
         }
-        if (!ok) await safeReply(chatId, `❌ خطأ: ${e.message.slice(0,80)}\nجرب /new`);
+        if (!ok) await safeReply(chatId, `❌ خطأ: ${e.message.slice(0, 80)}\nجرب /new`);
       }
     }
-
   } catch (err) {
-    try { require('fs').appendFileSync('bot.log', `[${new Date().toISOString()}] ERROR: ${err.message}\n${err.stack}\n`); } catch(e) {}
+    log(`ERROR: ${err.message}\n${err.stack}`);
   }
 });
 
 process.on('uncaughtException', (err) => {
-  try { require('fs').appendFileSync('bot.log', `[${new Date().toISOString()}] UNCAUGHT: ${err.message}\n${err.stack}\n`); } catch(e) {}
-  console.error('UNCAUGHT:', err.message);
+  log(`UNCAUGHT: ${err.message}\n${err.stack}`);
   setTimeout(() => process.exit(1), 1000);
 });
 process.on('unhandledRejection', (err) => {
-  try { require('fs').appendFileSync('bot.log', `[${new Date().toISOString()}] UNHANDLED: ${err.message}\n`); } catch(e) {}
-  console.error('UNHANDLED:', err.message);
+  log(`UNHANDLED: ${err.message}`);
 });
 
-console.log(`[${new Date().toISOString()}] ✅ Bot PID: ${process.pid} | Model: ${activeModel.name} | Owner: ${OWNER_ID}`);
-require('fs').appendFileSync('bot.log', `[${new Date().toISOString()}] START | PID: ${process.pid} | Model: ${activeModel.name} | Restart #${restartCount}\n`);
+log(`✅ Bot PID: ${process.pid} | Model: ${activeModel.name} | Owner: ${OWNER_ID}`);
+log(`START | PID: ${process.pid} | Model: ${activeModel.name} | Restart #${restartCount}`);
 
 bot.setMyCommands([
   { command: 'start', description: '🤖 بدء المحادثة' },
@@ -393,9 +403,9 @@ bot.setMyCommands([
   { command: 'active', description: '⭐ النموذج النشط' },
   { command: 'new', description: '🔄 محادثة جديدة' },
   { command: 'admin', description: '📬 مراسلة المطور' },
-]).catch(()=>{});
+]).catch(() => {});
 
-bot.sendMessage(OWNER_ID, `🚀 *البوت شغال!*\n🧠 ${activeModel.name}\n🔄 #${restartCount}\n📌 PID: \`${process.pid}\``, {parse_mode:'Markdown'}).catch(()=>{});
+bot.sendMessage(OWNER_ID, `🚀 *البوت شغال!*\n🧠 ${activeModel.name}\n🔄 #${restartCount}\n📌 PID: \`${process.pid}\``, { parse_mode: 'Markdown' }).catch(() => {});
 
 restartCount++;
 saveRestartCount();
