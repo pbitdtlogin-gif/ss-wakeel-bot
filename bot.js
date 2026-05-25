@@ -5,12 +5,16 @@ const API_URL = 'https://models.inference.ai.azure.com/chat/completions';
 
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+const ui = require('./ui');
 
 if (!TOKEN || !GITHUB_TOKEN) {
   console.error('❌ Missing BOT_TOKEN or GITHUB_TOKEN');
   process.exit(1);
 }
 
+// ===================== MODELS =====================
 const MODELS = [
   { id: 0, name: 'GPT-4o', model: 'gpt-4o', tier: 3 },
   { id: 1, name: 'DeepSeek-R1', model: 'DeepSeek-R1', tier: 3 },
@@ -30,13 +34,15 @@ const MODELS = [
 ];
 
 let activeModel = MODELS[0];
+let uiMode = 'auto'; // auto | terminal | dashboard | hologram | inline | center
 const users = {};
 const userChats = {};
+const userSettings = {}; // { uid: { uiMode, theme } }
 const MAX_HISTORY = 20;
 const startTime = Date.now();
 let messageCount = 0;
 let restartCount = 0;
-const fs = require('fs');
+
 try {
   const rc = fs.readFileSync('restart_count.txt', 'utf8').trim();
   restartCount = parseInt(rc) || 0;
@@ -54,11 +60,12 @@ function log(msg) {
   console.log(line.trim());
 }
 
+// ===================== AI =====================
 async function callAI(messages) {
   const body = { model: activeModel.model, messages, temperature: 0.7, max_tokens: 2048 };
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GITHUB_TOKEN}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GITHUB_TOKEN}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -69,6 +76,7 @@ async function callAI(messages) {
   return data.choices[0].message.content;
 }
 
+// ===================== USER MGMT =====================
 function registerUser(msg) {
   const uid = msg.from.id;
   if (!users[uid]) {
@@ -77,6 +85,7 @@ function registerUser(msg) {
       firstName: msg.from.first_name || '', lastName: msg.from.last_name || '',
       firstSeen: Date.now(), lastSeen: Date.now(), lastMessage: '',
     };
+    userSettings[uid] = { uiMode: 'auto', theme: 'dark' };
   }
   users[uid].lastSeen = Date.now();
   users[uid].lastMessage = msg.text || '(media)';
@@ -92,9 +101,10 @@ function addChat(uid, role, content) {
 }
 
 function getSystemPrompt(name) {
-  return `You are Karkroot, a smart and loyal AI assistant for Telegram. You speak Arabic and English. You are always helpful, concise, and fast. Answer the user's questions directly without fluff. The user's name is ${name || 'Unknown'}.`;
+  return `You are Karkroot, a smart and loyal AI assistant for Telegram. You speak Arabic and English. You are always helpful, concise, and fast. Answer user questions directly without fluff. The user's name is ${name || 'Unknown'}.`;
 }
 
+// ===================== MESSAGING =====================
 async function safeReply(chatId, text, opts = {}) {
   try {
     const maxLen = 4000;
@@ -112,39 +122,167 @@ async function safeReply(chatId, text, opts = {}) {
   }
 }
 
-const OWNER_CMDS = [
-  '🔐 *لوحة تحكم المطور — Karkroot*\n',
-  '📊 *الإدارة*',
-  '• /status — حالة البوت الكاملة',
-  '• /restart — إعادة تشغيل البوت',
-  '• /uptime — مدة التشغيل',
-  '• /pid — رقم العملية',
-  '',
-  '🧠 *النماذج*',
-  '• /models — عرض النماذج المتاحة',
-  '• /active — النموذج النشط حالياً',
-  '• /setmodel <رقم> — تغيير النموذج',
-  '• /testmodel <رقم> — اختبار نموذج',
-  '• /swap — تدوير تلقائي بين النماذج',
-  '',
-  '👥 *المستخدمين*',
-  '• /users — قائمة المستخدمين',
-  '• /uid <اسم> — البحث عن مستخدم',
-  '• /reply <id> <رسالة> — الرد على مستخدم',
-  '• /send <id> <رسالة> — إرسال مباشر',
-  '• /broadcast <رسالة> — بث للجميع',
-  '',
-  '⚙️ *متقدم*',
-  '• /logs — آخر 20 سطر سجل',
-  '• /clearlogs — مسح السجل',
-  '• /say <رسالة> — البوت يتكلم نيابة عنك',
-  '• /reset — إعادة ضبط البوت (مسح كل البيانات)',
-  '• /stats — إحصائيات البوت',
-  '• /export — تصدير بيانات المستخدمين',
-  '',
-  '🔒 *هذه الأوامر مخصصة للمالك فقط*',
-].join('\n');
+async function sendUIGreeting(chatId, msg) {
+  const uid = msg.from.id;
+  const uname = msg.from.first_name || 'مستخدم';
+  const us = userSettings[uid] || { uiMode: 'auto' };
+  
+  const response = `🤖 *مرحباً! أنا Karkroot* 🚀\n\n🧠 النشط: *${activeModel.name}*\n🎨 الواجهة: *${us.uiMode === 'auto' ? 'ذكية (تلقائية)' : us.uiMode}*\n\n📋 *السيناريوهات:*\n1️⃣ Terminal AI — واجهة الطرفية\n2️⃣ Dashboard — لوحة المعلومات\n3️⃣ Inline Mode — الأزرار الذكية\n4️⃣ Hologram — الهولوجرام\n5️⃣ Command Center — مركز القيادة\n\n🔄 البوت يختار الأنسب تلقائياً!\n\n📌 /help للمساعدة`;
 
+  // Send buttons for quick selection
+  try {
+    await bot.sendMessage(chatId, response, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💬 اسألني', callback_data: 'chat' }, { text: '🎨 Terminal', callback_data: 'ui_terminal' }],
+          [{ text: '📊 Dashboard', callback_data: 'ui_dashboard' }, { text: '🌀 Hologram', callback_data: 'ui_hologram' }],
+          [{ text: '⚡ Command Center', callback_data: 'ui_center' }, { text: '🔄 تلقائي', callback_data: 'ui_auto' }],
+        ]
+      }
+    });
+  } catch (e) {
+    await safeReply(chatId, response);
+  }
+}
+
+async function sendUIResponse(chatId, response, modelName, userName, stats, forceMode = null) {
+  const uid = chatId === OWNER_ID ? OWNER_ID : null;
+  const mode = forceMode || (uid && userSettings[uid]?.uiMode) || 'auto';
+  
+  try {
+    await bot.sendChatAction(chatId, 'upload_photo');
+    
+    let buffer;
+    let caption = response.length > 900 ? response.slice(0, 900) + '…' : response;
+
+    switch (mode) {
+      case 'terminal':
+        buffer = ui.renderTerminal(response, modelName, userName);
+        break;
+      case 'dashboard':
+        buffer = ui.renderDashboard(response, modelName, userName, stats);
+        break;
+      case 'hologram':
+        buffer = ui.renderHologram(response, modelName, userName);
+        break;
+      case 'center':
+        buffer = ui.renderCommandCenter(response, modelName, userName, stats);
+        break;
+      default: // auto
+        const result = ui.selectScenario(response, modelName, userName, stats);
+        buffer = result.buffer;
+        break;
+    }
+
+    const imgPath = `/tmp/ui_${chatId}_${Date.now()}.png`;
+    fs.writeFileSync(imgPath, buffer);
+    
+    await bot.sendPhoto(chatId, imgPath, {
+      caption: `<b>🧠 ${modelName}</b>\n\n${caption.replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 900)}`,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💬 رد نصي', callback_data: 'text_reply' }, { text: '🎨 غير الواجهة', callback_data: 'change_ui' }],
+        ]
+      }
+    });
+    
+    try { fs.unlinkSync(imgPath); } catch(e) {}
+  } catch (e) {
+    log(`UI render failed: ${e.message}`);
+    await safeReply(chatId, response);
+  }
+}
+
+// ===================== CALLBACKS =====================
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const uid = query.from.id;
+  const data = query.data;
+
+  try {
+    await bot.answerCallbackQuery(query.id);
+
+    if (data.startsWith('ui_')) {
+      const mode = data.replace('ui_', '');
+      userSettings[uid] = userSettings[uid] || {};
+      userSettings[uid].uiMode = mode;
+      await safeReply(chatId, `✅ الواجهة: *${mode === 'auto' ? 'تلقائية' : mode}*`);
+    }
+    
+    if (data === 'change_ui') {
+      await bot.sendMessage(chatId, '🎨 *اختر واجهة:*', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 تلقائي', callback_data: 'ui_auto' }, { text: '💻 Terminal', callback_data: 'ui_terminal' }],
+            [{ text: '📊 Dashboard', callback_data: 'ui_dashboard' }, { text: '🌀 Hologram', callback_data: 'ui_hologram' }],
+            [{ text: '⚡ Command Center', callback_data: 'ui_center' }],
+          ]
+        }
+      });
+    }
+
+    if (data === 'text_reply') {
+      // Re-send last response as text
+      // Just acknowledge
+    }
+    
+    if (data === 'chat') {
+      await safeReply(chatId, '💬 أرسل لي سؤالك!');
+    }
+    
+    // Delete the loading state
+    try { await bot.deleteMessage(chatId, query.message.message_id); } catch(e) {}
+  } catch (e) {
+    log(`Callback error: ${e.message}`);
+  }
+});
+
+// ===================== OWNER COMMANDS =====================
+const OWNER_CMDS = `🔐 *لوحة تحكم المطور — Karkroot* 🚀
+
+📊 *الإدارة*
+• /status — حالة البوت الكاملة
+• /restart — إعادة تشغيل البوت
+• /uptime — مدة التشغيل
+• /pid — رقم العملية
+
+🧠 *النماذج*
+• /models — عرض النماذج
+• /active — النموذج النشط
+• /setmodel <رقم> — تغيير النموذج
+• /testmodel <رقم> — اختبار
+• /swap — تدوير تلقائي
+
+👥 *المستخدمين*
+• /users — قائمة المستخدمين
+• /uid <اسم> — البحث
+• /reply <id> <رسالة> — الرد
+• /send <id> <رسالة> — إرسال مباشر
+• /broadcast <رسالة> — بث
+
+🎨 *واجهات UI (5 سيناريوهات)*
+• /ui — تغيير واجهة البوت
+• /ui_terminal — Terminal AI 💻
+• /ui_dashboard — Dashboard 📊
+• /ui_hologram — Holographic 🌀
+• /ui_center — Command Center ⚡
+• /ui_inline — Inline Mode 🔘
+• /ui_auto — تلقائي 🔄
+
+⚙️ *متقدم*
+• /logs — آخر 20 سطر
+• /clearlogs — مسح السجل
+• /say <رسالة> — البوت يتكلم
+• /reset — إعادة ضبط
+• /stats — إحصائيات
+• /export — تصدير المستخدمين
+
+🔒 *مخصص للمالك فقط*`;
+
+// ===================== MAIN HANDLER =====================
 bot.on('message', async (msg) => {
   try {
     const chatId = msg.chat.id;
@@ -156,16 +294,40 @@ bot.on('message', async (msg) => {
     if (!isOwner || !isPrivate) registerUser(msg);
     messageCount++;
 
-    // ===== OWNER COMMANDS =====
+    // ===== OWNER ONLY =====
     if (isOwner && isPrivate) {
       if (text === '/owner' || text === '/dev') return await safeReply(chatId, OWNER_CMDS);
+
+      // UI Commands
+      if (text === '/ui') {
+        return await bot.sendMessage(chatId, '🎨 *اختر واجهة البوت:*', {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 تلقائي (ذكي)', callback_data: 'ui_auto' }, { text: '💻 Terminal AI', callback_data: 'ui_terminal' }],
+              [{ text: '📊 Dashboard', callback_data: 'ui_dashboard' }, { text: '🌀 Hologram', callback_data: 'ui_hologram' }],
+              [{ text: '⚡ Command Center', callback_data: 'ui_center' }, { text: '🔘 Inline Mode', callback_data: 'ui_inline' }],
+            ]
+          }
+        });
+      }
+
+      const uiModes = ['terminal', 'dashboard', 'hologram', 'center', 'inline', 'auto'];
+      for (const m of uiModes) {
+        if (text === `/ui_${m}`) {
+          userSettings[uid] = userSettings[uid] || {};
+          userSettings[uid].uiMode = m;
+          return await safeReply(chatId, `✅ واجهة *${m}* مفعلة! ${m === 'auto' ? '🤖 البوت سيختار الأنسب تلقائياً' : ''}`);
+        }
+      }
 
       if (text === '/status') {
         const uptime = Math.floor((Date.now() - startTime) / 1000);
         const h = Math.floor(uptime / 3600), m = Math.floor((uptime % 3600) / 60), s = uptime % 60;
         const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
+        const mode = userSettings[uid]?.uiMode || 'auto';
         return await safeReply(chatId,
-          `📊 *حالة البوت*\n\n🤖 *@Ss_Wakeel_bot*\n• 🟢 شغال\n• PID: \`${process.pid}\`\n• وقت: ${h}h ${m}m ${s}s\n• إعادة: #${restartCount}\n• رسائل: ${messageCount}\n• مستخدمين: ${Object.keys(users).length}\n\n🧠 *${activeModel.name}* ⭐\n💾 ذاكرة: ${mem} MB\n📌 الموديل: \`${activeModel.model}\``);
+          `📊 *حالة البوت*\n\n🤖 *@Ss_Wakeel_bot*\n• 🟢 شغال\n• PID: \`${process.pid}\`\n• وقت: ${h}h ${m}m ${s}s\n• إعادة: #${restartCount}\n• رسائل: ${messageCount}\n• مستخدمين: ${Object.keys(users).length}\n\n🧠 *${activeModel.name}* ⭐\n🎨 واجهة: *${mode}*\n💾 ذاكرة: ${mem} MB\n📌 الموديل: \`${activeModel.model}\``);
       }
 
       if (text === '/uptime') {
@@ -181,12 +343,12 @@ bot.on('message', async (msg) => {
         const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
         const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
         return await safeReply(chatId,
-          `📊 *إحصائيات البوت*\n\n⏱ التشغيل: ${h}h ${m}m ${s}s\n🔄 إعادة تشغيل: #${restartCount}\n💬 رسائل: ${messageCount}\n👥 مستخدمين: ${Object.keys(users).length}\n🧠 النموذج: ${activeModel.name}\n💾 الذاكرة: ${mem} MB\n📌 PID: \`${process.pid}\``);
+          `📊 *إحصائيات البوت*\n\n⏱ التشغيل: ${h}h ${m}m ${s}s\n🔄 إعادة: #${restartCount}\n💬 رسائل: ${messageCount}\n👥 مستخدمين: ${Object.keys(users).length}\n🧠 النموذج: ${activeModel.name}\n💾 الذاكرة: ${mem} MB\n📌 PID: \`${process.pid}\``);
       }
 
       if (text === '/export') {
         const list = Object.values(users);
-        if (!list.length) return await safeReply(chatId, '📭 ولا مستخدم للتصدير');
+        if (!list.length) return await safeReply(chatId, '📭 ولا مستخدم');
         let csv = 'ID,Username,FirstName,LastName,FirstSeen,LastSeen,LastMessage\n';
         list.forEach(u => {
           csv += `${u.id},${u.username||''},${u.firstName||''},${u.lastName||''},${new Date(u.firstSeen).toISOString()},${new Date(u.lastSeen).toISOString()},${(u.lastMessage||'').replace(/,/g,' ')}\n`;
@@ -319,13 +481,12 @@ bot.on('message', async (msg) => {
 
     // ===== USER COMMANDS =====
     if (text === '/start') {
-      return await safeReply(chatId,
-        `🤖 *مرحباً! أنا Karkroot*\n\nأقوى بوت ذكاء اصطناعي على تيليجرام 🧠\nالنشط: *${activeModel.name}*\n\n*الأوامر:*\n/help — مساعدة\n/models — النماذج\n/active — النموذج النشط\n/new — محادثة جديدة\n/admin — مراسلة المطور\n\nأرسل لي أي سؤال! 🚀`);
+      return await sendUIGreeting(chatId, msg);
     }
 
     if (text === '/help') {
       return await safeReply(chatId,
-        `❓ *مساعدة*\n\n🧠 النموذج: *${activeModel.name}*\n📬 /admin <رسالة> — تواصل مع المطور\n🔄 /new — بدء محادثة جديدة\n💡 فقط اسألني!`);
+        `❓ *مساعدة*\n\n🧠 النموذج: *${activeModel.name}*\n📬 /admin <رسالة> — تواصل مع المطور\n🔄 /new — بدء محادثة جديدة\n🎨 البوت يستخدم 5 واجهات ذكية!\n💡 فقط اسألني!`);
     }
 
     if (text === '/models') {
@@ -357,10 +518,26 @@ bot.on('message', async (msg) => {
         { role: 'system', content: getSystemPrompt(name) },
         ...(userChats[uid] || []),
       ];
+
+      let reply;
       try {
-        const reply = await callAI(ctx);
+        reply = await callAI(ctx);
         addChat(uid, 'assistant', reply);
-        await safeReply(chatId, reply);
+        
+        // Smart UI or text?
+        const us = userSettings[uid] || { uiMode: 'auto' };
+        if (us.uiMode === 'inline' || (us.uiMode === 'auto' && reply.length < 80 && !reply.includes('```'))) {
+          // Short reply → text is fine
+          await safeReply(chatId, reply);
+        } else {
+          // Send as UI image
+          const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
+          await sendUIResponse(chatId, reply, activeModel.name, name, {
+            users: Object.keys(users).length,
+            messages: messageCount,
+            memory: mem,
+          }, us.uiMode === 'auto' ? null : us.uiMode);
+        }
       } catch (e) {
         log(`AI error: ${e.message}`);
         let ok = false;
@@ -385,6 +562,7 @@ bot.on('message', async (msg) => {
   }
 });
 
+// ===================== PROCESS =====================
 process.on('uncaughtException', (err) => {
   log(`UNCAUGHT: ${err.message}\n${err.stack}`);
   setTimeout(() => process.exit(1), 1000);
@@ -405,7 +583,7 @@ bot.setMyCommands([
   { command: 'admin', description: '📬 مراسلة المطور' },
 ]).catch(() => {});
 
-bot.sendMessage(OWNER_ID, `🚀 *البوت شغال!*\n🧠 ${activeModel.name}\n🔄 #${restartCount}\n📌 PID: \`${process.pid}\``, { parse_mode: 'Markdown' }).catch(() => {});
+bot.sendMessage(OWNER_ID, `🚀 *البوت شغال!*\n🧠 ${activeModel.name}\n🔄 #${restartCount}\n🎨 5 واجهات UI جاهزة!\n📌 PID: \`${process.pid}\``, { parse_mode: 'Markdown' }).catch(() => {});
 
 restartCount++;
 saveRestartCount();
