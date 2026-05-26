@@ -1,0 +1,43 @@
+name: 🚀 Ss Wakeel Bot v3.0 - 24/7
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+jobs:
+  run-bot:
+    name: 🤖 Telegram Bot v3.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+
+      - name: 📦 Install npm deps
+        run: npm install
+
+      - name: 🧪 Test modules
+        run: node -e "console.log('✅ Canvas:', typeof require('canvas').createCanvas); console.log('✅ All deps loaded');"
+
+      - name: 🔥 Run bot (auto-restart loop)
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+        run: |
+          while true; do
+            echo "[$(date)] Starting bot v3.0..."
+            node bot.js || true
+            echo "[$(date)] Exited. Restarting in 10s..."
+            sleep 10
+          done

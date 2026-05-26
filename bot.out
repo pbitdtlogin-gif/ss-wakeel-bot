@@ -1,0 +1,7 @@
+[2026-05-26T01:17:52.405Z] 🤖 Bot v3.0 starting...
+[2026-05-26T01:17:52.406Z] 🤖 Bot v3.0 started successfully!
+[2026-05-26T01:17:52.407Z] 📤 Uploading to GitHub...
+[2026-05-26T01:17:53.609Z] ⚠️ GitHub push skipped: Command failed: cd /workspace && git add -A && git commit -m "v3.0: Full rebuild + 5 UIs + self-heal" 2>/dev/null && git push 2>/dev/null
+[2026-05-26T01:17:53.609Z] ✅ Bot ready for action! 🚀
+(node:792) [node-telegram-bot-api] DeprecationWarning: Buffers will have their filenames default to "filename" instead of "data". See https://github.com/yagop/node-telegram-bot-api/blob/master/doc/usage.md#sending-files for more information on how sending files has been improved and on how to disable this deprecation message altogether.
+(Use `node --trace-deprecation ...` to show where the warning was created)

@@ -1,0 +1,16 @@
+{
+  "name": "ss-wakeel-bot",
+  "version": "3.0.0",
+  "description": "SS Wakeel - Ultra AI Telegram Bot with GitHub Models",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "test": "node -e \"require('./src/ai'); require('./src/ui'); require('./src/heal'); console.log('✅ All modules OK')\""
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "node-fetch": "^2.7.0",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}

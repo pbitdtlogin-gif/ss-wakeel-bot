@@ -1,0 +1,10 @@
+node_modules/
+bot.log
+bot.pid
+restart_count.txt
+.env
+.env.example
+heal.log
+bot_*.log
+heal_*.log
+/tmp/
