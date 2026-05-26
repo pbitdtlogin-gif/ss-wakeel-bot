@@ -1,4 +1,4 @@
-name: 🚀 Ss Wakeel Bot - 24/7 Operation
+name: 🚀 Ss Wakeel Bot v3.0 - 24/7 Operation
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   run-bot:
-    name: 🤖 Telegram Bot
+    name: 🤖 Telegram Bot v3.0
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -18,14 +18,26 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: 📦 Install dependencies
+      - name: 📦 Install system deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
-          npm install
 
-      - name: ✅ Test modules
-        run: node -e "require('./ui'); require('./self_heal'); console.log('✅ All good')"
+      - name: 📦 Install npm deps
+        run: npm install
+
+      - name: ✅ Test all modules
+        run: node -e "
+          const {AIEngine} = require('./src/ai');
+          const ui = require('./src/ui');
+          const {HealProtocol} = require('./src/heal');
+          console.log('✅ AI:', AIEngine.name);
+          console.log('✅ UI:', Object.keys(ui).length, 'scenarios');
+          console.log('✅ Heal:', HealProtocol.name);
+          const buf = ui.terminal('test', 'GPT-4o', 'test');
+          console.log('✅ Render OK:', buf.length, 'bytes');
+          console.log('🎉 ALL MODULES PASSED');
+        "
 
       - name: 🔥 Run bot (auto-restart loop)
         env:
@@ -34,6 +46,8 @@ jobs:
           OWNER_ID: ${{ secrets.OWNER_ID }}
         run: |
           while true; do
-            echo "[$(date)] Starting bot..." && node bot.js || true
-            echo "[$(date)] Exited. Restarting in 10s..." && sleep 10
+            echo "[$(date)] Starting bot v3.0..."
+            node src/index.js || true
+            echo "[$(date)] Exited. Restarting in 10s..."
+            sleep 10
           done
